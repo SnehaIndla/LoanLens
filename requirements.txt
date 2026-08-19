@@ -1,0 +1,13 @@
+streamlit
+fastapi
+uvicorn
+pydantic
+pypdf
+python-multipart
+pandas
+networkx
+python-dotenv
+openai
+pytest
+reportlab
+Pillow
