@@ -1,4 +1,11 @@
+import sys
 from pathlib import Path
+
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
 
 from extractor import extract_text
 from classifier import classify_document
@@ -280,7 +287,8 @@ def analyze_loan(loan_id):
         tax_result,
         bank_result,
         profile_results,
-        identity_result
+        identity_result,
+        applicant_record=record
     )
 
     print("\n" + "=" * 60)

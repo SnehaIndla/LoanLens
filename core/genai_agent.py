@@ -1,4 +1,9 @@
-import ollama
+import os
+
+try:
+    import ollama
+except ImportError:
+    ollama = None
 
 
 def generate_ai_summary(
@@ -27,6 +32,19 @@ def generate_ai_summary(
             ]
         },
 
+        "ml_credit_risk": (
+            {
+                "decision": risk_result["ml_prediction"]["decision"],
+                "approval_probability": f"{risk_result['ml_prediction']['approval_probability_pct']}%",
+                "top_shap_factors": [
+                    f"{f['feature']}: {f['direction']}"
+                    for f in risk_result["ml_prediction"].get("top_factors", [])
+                ]
+            }
+            if risk_result.get("ml_prediction")
+            else "NOT_AVAILABLE"
+        ),
+
         "findings": list(
             risk_result["findings"]
         ),
@@ -42,8 +60,8 @@ def generate_ai_summary(
                 else "MISSING"
             ),
             "difference_percent": (
-                payslip_result["difference_percent"]
-                if payslip_result
+                payslip_result.get("difference_percent")
+                if isinstance(payslip_result, dict)
                 else None
             )
         },
@@ -55,40 +73,41 @@ def generate_ai_summary(
                 else "MISSING"
             ),
             "difference_percent": (
-                tax_result["difference_percent"]
-                if tax_result
+                tax_result.get("difference_percent")
+                if isinstance(tax_result, dict)
                 else None
             )
         },
 
         "bank_assets": {
             "dataset_value": (
-                bank_result["dataset_bank_assets"]
-                if bank_result
+                bank_result.get("dataset_bank_assets")
+                if isinstance(bank_result, dict)
                 else None
             ),
             "document_value": (
-                bank_result["document_bank_assets"]
-                if bank_result
+                bank_result.get("document_bank_assets")
+                if isinstance(bank_result, dict)
                 else None
             ),
             "difference_percent": (
-                bank_result["difference_percent"]
-                if bank_result
+                bank_result.get("difference_percent")
+                if isinstance(bank_result, dict)
                 else None
             )
         },
 
         "profile": [
             {
-                "check": result["check"],
-                "match": result["match"]
+                "check": result.get("check"),
+                "match": result.get("match")
             }
             for result in profile_results
+            if isinstance(result, dict)
         ],
 
         "identity": {
-            "status": identity_result["status"]
+            "status": identity_result.get("status", "unknown") if isinstance(identity_result, dict) else "unknown"
         }
     }
 
@@ -247,18 +266,28 @@ The explanation must strictly follow the verified evidence.
 
 
     # --------------------------------------------------
-    # Generate AI Explanation
+    # Generate AI Explanation via Ollama Local LLM
     # --------------------------------------------------
 
-    response = ollama.chat(
-        model="qwen2:7b",
-        messages=[
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ]
-    )
+    if ollama is None:
+        return "[AI Generation Offline: 'ollama' Python package is not installed in the active environment.]"
 
+    model_name = os.getenv("OLLAMA_MODEL", "qwen2:7b")
 
-    return response["message"]["content"]
+    try:
+        response = ollama.chat(
+            model=model_name,
+            messages=[
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ]
+        )
+        return response["message"]["content"]
+    except Exception as e:
+        return (
+            f"[AI Generation Offline: Ollama service or model '{model_name}' not reachable.\n"
+            f"Error: {e}\n"
+            f"To start Ollama locally, run: ollama serve (and ollama run {model_name})]"
+        )
