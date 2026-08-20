@@ -1,5 +1,9 @@
 from pathlib import Path
-from pypdf import PdfReader
+
+try:
+    from pypdf import PdfReader
+except ImportError:
+    from PyPDF2 import PdfReader
 
 
 def extract_text(pdf_path):
