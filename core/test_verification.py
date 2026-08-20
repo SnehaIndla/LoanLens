@@ -6,6 +6,7 @@ from claims import extract_claims
 
 from verification import (
     get_loan_record,
+    load_dataset,
     compare_bank_assets,
     compare_profile,
     compare_document_identity,
@@ -280,7 +281,9 @@ def analyze_loan(loan_id):
         tax_result,
         bank_result,
         profile_results,
-        identity_result
+        identity_result,
+        record,
+        load_dataset()
     )
 
     print("\n" + "=" * 60)
@@ -317,6 +320,43 @@ def analyze_loan(loan_id):
         print(
             "✓ No significant issues detected"
         )
+
+    # =================================
+    # FLAGS
+    # =================================
+
+    if risk_result.get("flags"):
+
+        print("\nFLAGS:")
+
+        for flag in risk_result["flags"]:
+
+            print(
+                f"🚩 {flag}"
+            )
+
+    # =================================
+    # SIMILAR PAST CASES
+    # =================================
+
+    similar_cases = risk_result.get(
+        "similar_past_cases",
+        []
+    )
+
+    if similar_cases:
+
+        print("\nSIMILAR PAST CASES:")
+
+        for case in similar_cases:
+
+            print(
+                f"  Loan {case['loan_id']}"
+                f" | Similarity:"
+                f" {case['similarity_score']}"
+                f" | Status:"
+                f" {case['loan_status']}"
+            )
 
     # =================================
     # LOAN PROCESSING SUMMARY
