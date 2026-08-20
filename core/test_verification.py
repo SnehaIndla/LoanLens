@@ -1,4 +1,8 @@
 from pathlib import Path
+import pytest
+from unittest.mock import patch
+from claims import SeverityLevel
+from verification import CrossValidationAgent
 
 from extractor import extract_text
 from classifier import classify_document
@@ -384,7 +388,139 @@ def analyze_loan(loan_id):
 # TEST LOANS 5–8
 # =====================================
 
-if __name__ == "__main__":
+# =====================================
+# PYTEST UNIT TESTS
+# =====================================
 
+@pytest.fixture(autouse=True)
+def mock_ollama():
+    with patch("ollama.chat") as mock_chat:
+        mock_chat.return_value = {
+            "message": {
+                "content": "Mocked AI explanation."
+            }
+        }
+        yield mock_chat
+
+
+def test_perfect_match():
+    record = {
+        "applicant_name": "John Doe",
+        "person_income": 120000.0,
+        "person_emp_length": 5.0,
+        "cb_person_default_on_file": "N",
+        "cb_person_cred_hist_length": 10.0,
+        "person_age": 30.0,
+        "person_home_ownership": "OWN",
+        "loan_amnt": 20000.0,
+        "loan_id": 101
+    }
+    extracted = {
+        "borrower_name": "John Doe",
+        "employer": "Tech Corp",
+        "monthly_income": 10000.0,  # 10000 * 12 = 120000
+        "years_at_company": 5.0,
+        "defaults": 0,
+        "credit_history_duration": 10.0,
+        "calculated_age": 30.0,
+        "dob": "1996-08-20"
+    }
+
+    agent = CrossValidationAgent()
+    res = agent.cross_check_fields(record, extracted)
+
+    assert res.is_consistent is True
+    assert res.consistency_score == 100.0
+    assert res.total_discrepancies == 0
+
+
+def test_income_inflation():
+    record = {
+        "applicant_name": "John Doe",
+        "person_income": 95000.0,
+        "loan_id": 102
+    }
+    extracted = {
+        "borrower_name": "John Doe",
+        "employer": "Tech Corp",
+        "monthly_income": 5000.0,  # 5000 * 12 = 60000
+    }
+
+    agent = CrossValidationAgent()
+    res = agent.cross_check_fields(record, extracted)
+
+    assert res.is_consistent is False
+    assert res.high_count == 1
+    
+    income_disc = next(d for d in res.discrepancies if d.field == "person_income")
+    assert income_disc.severity == SeverityLevel.HIGH
+    assert income_disc.variance_percentage > 35.0
+
+
+def test_default_concealment():
+    record = {
+        "applicant_name": "John Doe",
+        "cb_person_default_on_file": "N",
+        "loan_id": 103
+    }
+    extracted = {
+        "borrower_name": "John Doe",
+        "defaults": 2,
+    }
+
+    agent = CrossValidationAgent()
+    res = agent.cross_check_fields(record, extracted)
+
+    assert res.is_consistent is False
+    assert res.critical_count == 1
+    
+    default_disc = next(d for d in res.discrepancies if d.field == "cb_person_default_on_file")
+    assert default_disc.severity == SeverityLevel.CRITICAL
+
+
+def test_fuzzy_name():
+    record = {
+        "applicant_name": "Robert C. Jenkins",
+        "loan_id": 104
+    }
+    extracted = {
+        "borrower_name": "Robert Jenkins",
+    }
+
+    agent = CrossValidationAgent()
+    res = agent.cross_check_fields(record, extracted)
+
+    assert res.low_count == 1
+    name_disc = next(d for d in res.discrepancies if d.field == "applicant_name")
+    assert name_disc.severity == SeverityLevel.LOW
+
+
+def test_multiple_stacking_discrepancies():
+    record = {
+        "applicant_name": "John Doe",
+        "person_income": 100000.0,
+        "person_emp_length": 8.0,
+        "person_home_ownership": "RENT",
+        "loan_id": 105
+    }
+    extracted = {
+        "borrower_name": "John Doe",
+        "employer": "Tech Corp",
+        "monthly_income": 7000.0,  # 84k (100k vs 84k -> 19.05% higher -> HIGH: -20)
+        "years_at_company": 6.5,  # 8 vs 6.5 -> 1.5 year variance -> MEDIUM: -10
+        "rent_debits": None,  # missing rent debits -> MEDIUM: -10
+    }
+
+    agent = CrossValidationAgent()
+    res = agent.cross_check_fields(record, extracted)
+
+    assert res.is_consistent is False
+    assert res.consistency_score == 60.0
+    assert res.high_count == 1
+    assert res.medium_count == 2
+    assert res.total_discrepancies == 3
+
+
+if __name__ == "__main__":
     for loan_id in range(1, 11):
         analyze_loan(loan_id)

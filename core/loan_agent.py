@@ -36,10 +36,83 @@ def verify_loan(state: LoanState):
 
     print("Running document verification...")
 
-    from test_verification import analyze_loan
+    from verification import get_loan_record, CrossValidationAgent
+    from test_verification import read_loan_documents, analyze_loan
 
-    result = analyze_loan(state["loan_id"])
+    loan_id = state["loan_id"]
+    record = get_loan_record(loan_id)
+    if record is None:
+        print(f"Loan record not found for Loan ID: {loan_id}")
+        state["verification_result"] = None
+        return state
 
+    claims, document_claims = read_loan_documents(loan_id)
+
+    try:
+        result = analyze_loan(loan_id)
+    except Exception as e:
+        print(f"analyze_loan failed or Ollama not running: {e}. Falling back to default summaries.")
+        from risk_engine import calculate_risk
+        from document_requirements import check_missing_documents
+        from verification import (
+            compare_bank_assets,
+            compare_profile,
+            compare_document_identity,
+            check_payslip_income,
+            check_tax_income
+        )
+        from summary_generator import generate_summary
+        
+        missing_documents = check_missing_documents(document_claims)
+        payslip_res = check_payslip_income(record, claims)
+        tax_res = check_tax_income(record, claims)
+        bank_res = compare_bank_assets(record, claims)
+        profile_res = compare_profile(record, claims)
+        identity_res = compare_document_identity(document_claims)
+        
+        risk_res = calculate_risk(
+            missing_documents,
+            payslip_res,
+            tax_res,
+            bank_res,
+            profile_res,
+            identity_res
+        )
+        
+        summary = generate_summary(
+            loan_id,
+            risk_res,
+            missing_documents,
+            payslip_res,
+            tax_res,
+            bank_res,
+            profile_res,
+            identity_res
+        )
+        
+        result = {
+            "loan_id": loan_id,
+            "record": record,
+            "claims": claims,
+            "missing_documents": missing_documents,
+            "payslip_result": payslip_res,
+            "tax_result": tax_res,
+            "bank_result": bank_res,
+            "profile_results": profile_res,
+            "identity_result": identity_res,
+            "risk_result": risk_res,
+            "summary": summary,
+            "ai_summary": summary
+        }
+
+    agent = CrossValidationAgent()
+    validation_result = agent.cross_check_fields(record, claims)
+
+    # Merge validation_result fields into the result dictionary
+    validation_result_dict = validation_result.model_dump()
+    result.update(validation_result_dict)
+
+    # Save dictionary representation of the merged result to state
     state["verification_result"] = result
 
     return state
@@ -53,13 +126,15 @@ def assess_risk(state: LoanState):
 
     print("Running risk assessment...")
 
-    result = state.get("verification_result")
+    validation_result = state.get("verification_result")
 
-    if not result:
+    if not validation_result:
         print("No verification result available.")
         return state
 
-    risk = result.get("risk_result", {})
+    from risk_engine import calculate_risk
+
+    risk = calculate_risk(validation_result=validation_result)
 
     state["risk_score"] = risk.get("risk_score", 0)
     state["risk_level"] = risk.get("risk_level", "UNKNOWN")
@@ -126,20 +201,11 @@ def recheck_evidence(state: LoanState):
     print("\nAgent detected an issue.")
     print("Re-checking verification evidence...")
 
-    verification = state.get(
-        "verification_result",
-        {}
-    )
-
-    risk = verification.get(
-        "risk_result",
-        {}
-    )
-
-    findings = risk.get(
-        "findings",
-        []
-    )
+    findings = state.get("findings", [])
+    if not findings:
+        verification = state.get("verification_result", {}) or {}
+        risk = verification.get("risk_result", {}) if isinstance(verification, dict) else {}
+        findings = risk.get("findings", [])
 
     # Re-evaluate the evidence already produced
     if findings:
