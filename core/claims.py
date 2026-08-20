@@ -1,4 +1,39 @@
 import re
+from enum import Enum
+from typing import Any, Dict, List, Optional
+from pydantic import BaseModel, Field
+
+
+class SeverityLevel(str, Enum):
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+
+
+class Discrepancy(BaseModel):
+    field: str
+    declared_value: Any
+    extracted_value: Any
+    variance_percentage: Optional[float] = None
+    severity: SeverityLevel
+    document_source: str
+    reason: str
+    evidence_ref: Optional[str] = None
+
+
+class ValidationResult(BaseModel):
+    case_id: str
+    applicant_id: str
+    is_consistent: bool
+    total_discrepancies: int
+    critical_count: int
+    high_count: int
+    medium_count: int
+    low_count: int
+    discrepancies: List[Discrepancy]
+    consistency_score: float  # 0.0 to 100.0
+    summary_text: str
 
 
 def extract_claims(text, document_type):
@@ -54,6 +89,15 @@ def extract_claims(text, document_type):
             claims["monthly_income"] = float(
                 match.group(1).replace(",", "")
             )
+
+        match = re.search(
+            r"Employer:\s*(.+)",
+            text,
+            re.IGNORECASE
+        )
+
+        if match:
+            claims["employer"] = match.group(1).strip()
 
     # -----------------------------
     # Bank Statement
